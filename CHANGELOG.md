@@ -25,7 +25,7 @@
 - `setup.py check` 會檢查 ffmpeg 版本（需要 5.1 以上），並給 Ubuntu 22.04 的升級方法。
 - Mac 開了「iCloud 桌面與文件」、Windows 桌面被 OneDrive 接管時，「AI剪片」改放家目錄（避免幾 GB 的影片一直上傳），並說明原因；`--allow-cloud` 可以強制放回去。
 - pip 安裝看得到進度，失敗時印白話說明和最後 20 行訊息。
-- 安裝自我測試會逐項檢查：基本套件、聽打引擎、OpenCV／MediaPipe、字型。
+- 安裝自我測試會逐項檢查：基本套件、聽打引擎、OpenCV／MediaPipe（含原生函式庫）、字型。Linux 缺圖形函式庫時會提示 `sudo apt install libgl1 libegl1 libgles2`。
 - 重跑 `install` 時，改過的 `CLAUDE.md`／`AGENTS.md` 會先備份成 `.bak-日期`。
 - 第一次用 mlx 聽打時會提示要下載約 1.5 GB 的模型。
 
