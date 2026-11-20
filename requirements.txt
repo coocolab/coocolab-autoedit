@@ -1,7 +1,7 @@
-numpy>=1.24
-pillow>=10.0
-opencc-python-reimplemented>=0.1.7
-faster-whisper>=1.1.0 ; sys_platform != "darwin" or platform_machine != "arm64"
-mlx-whisper>=0.4.2 ; sys_platform == "darwin" and platform_machine == "arm64"
-opencv-python-headless>=4.8
-mediapipe>=0.10.14
+# 主要套件：聽打、剪片、字幕。動態特效另外在 requirements-fx.txt（裝不起來也不影響其他功能）。
+numpy>=1.24,<3
+pillow>=10.0,<14
+opencc-python-reimplemented>=0.1.7,<0.2
+faster-whisper>=1.1.0,<2 ; sys_platform != "darwin" or platform_machine != "arm64"
+mlx-whisper>=0.4.2,<0.5 ; sys_platform == "darwin" and platform_machine == "arm64"
+certifi

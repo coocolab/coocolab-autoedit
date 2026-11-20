@@ -1,0 +1,4 @@
+# 動態特效（人像去背）用，選用。MediaPipe 會一起裝 OpenCV（opencv-contrib-python）。
+# Intel Mac 只有 mediapipe 0.10.21 以前的版本，而且只支援 Python 3.9～3.12。
+mediapipe>=0.10.14,<1.3
+opencv-contrib-python>=4.8,<5.2
