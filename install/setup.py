@@ -246,6 +246,11 @@ for label, mods in [("基本（numpy、Pillow、簡轉繁）", ["numpy", "PIL", 
     try:
         for m in mods:
             importlib.import_module(m)
+        if mods[0] == "cv2":
+            from autoedit.fx import fx_available
+            why = fx_available()
+            if why:
+                raise RuntimeError(why)
         res[label] = "OK"
     except Exception as e:
         res[label] = "失敗：%s: %s" % (type(e).__name__, str(e)[:160])
@@ -339,8 +344,8 @@ def install(folder, allow_cloud=False, skip_fx=False):
     bad = False
     for k, val in res.items():
         print(f"{k}：{val}")
-        if "libGL" in str(val):
-            print("  → Linux 缺少圖形函式庫，執行 sudo apt install libgl1 再重跑 install，就能用動態特效。")
+        if "libGL" in str(val) or "libEGL" in str(val):
+            print("  → Linux 缺少圖形函式庫，執行 sudo apt install libgl1 libegl1 再重跑 install，就能用動態特效。")
         if str(val).startswith("失敗") and not k.startswith("動態特效"):
             bad = True
     print("\n── 安裝完成 ──" if not bad else "\n── 安裝有問題 ──")

@@ -911,9 +911,18 @@ def fx_available():
         import cv2  # noqa: F401
         import mediapipe  # noqa: F401
         from mediapipe.tasks.python import vision  # noqa: F401
+        try:                                     # mediapipe 0.10.30+: the native library loads only on first use
+            from mediapipe.tasks.python.core import mediapipe_c_bindings as cb
+        except ImportError:
+            cb = None
+        if cb is not None and hasattr(cb, "load_raw_library"):
+            cb.load_raw_library()
         return None
     except Exception as e:  # noqa: BLE001
-        return f"{type(e).__name__}: {e}"
+        msg = f"{type(e).__name__}: {e}"
+        if "libEGL" in msg or "libGL" in msg:
+            msg += "。Linux 請先執行 sudo apt install libgl1 libegl1"
+        return msg
 
 
 def _no_fx(d, proj, msg):

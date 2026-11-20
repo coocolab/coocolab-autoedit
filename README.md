@@ -42,7 +42,7 @@ python3 install/setup.py install    # 建環境、裝套件、下載字型、建
 - `install` 會一次裝完 Python 套件和字型（下載幾百 MB，裝好後 `.venv` 約 1.5 GB；語音模型另外約 1.5 GB，第一次聽打時才下載），約 1～5 分鐘。指令不要被中斷；被中斷的話重跑一次就好，已經裝好的會跳過，下載到一半的檔案會重新下載。
 - 「AI剪片」資料夾預設放桌面。但如果桌面會同步到雲端（Mac 開了「iCloud 桌面與文件」、Windows 桌面被 OneDrive 接管），會改放在家目錄底下的 `AI剪片`，因為幾 GB 的影片會一直上傳。真的要放雲端資料夾，加 `--allow-cloud`。指定位置用 `--folder 路徑`。
 - 動態特效用的 MediaPipe 是選用的（`requirements-fx.txt`）。裝不起來時只有特效不能用，其他功能照常。
-- Linux：Ubuntu 22.04 的 apt ffmpeg 是 4.4，太舊，請用 `sudo snap install ffmpeg` 或靜態版；動態特效需要 `sudo apt install libgl1`。
+- Linux：Ubuntu 22.04 的 apt ffmpeg 是 4.4，太舊，請用 `sudo snap install ffmpeg` 或靜態版；動態特效需要 `sudo apt install libgl1 libegl1`。
 - 重跑 `install` 時，如果 `AI剪片` 裡的 `CLAUDE.md`／`AGENTS.md` 被你改過，舊的會先備份成 `.bak-日期`。
 
 ## 怎麼用
