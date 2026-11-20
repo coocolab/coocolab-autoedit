@@ -6,3 +6,8 @@ assets/fonts/*.ttf
 install/installed.json
 .DS_Store
 assets/models/*.tflite
+*.part
+*.tmp
+assets/fonts/*.txt
+autoedit-error.log
+.pytest_cache/

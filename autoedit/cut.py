@@ -7,12 +7,13 @@
 - Jump cuts alternate between normal framing and a slight push-in (1.08x), which hides the jump.
 - Output: cut_video.mp4 (no sound), cut48.wav, timeline.json (every kept word on the new timeline).
 """
+import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
 
-from .common import SR_OUT, die, ffmpeg, load, need, read_wav, rms_db, run, save, write_wav
+from .common import die, ffmpeg, ffmpeg_version, load, need, read_wav, rms_db, run, save, write_wav
 
 LONG_PAUSE = 0.45      # a silence inside a kept piece longer than this gets shortened...
 PAUSE_KEEP = 0.14      # ...to this much on each side
@@ -30,9 +31,9 @@ def _snap_quiet(env, t, lo, hi):
 
 
 def build_spans(d):
+    from .suggest import load_cuts
     proj = load(d, "project.json")
-    isl = load(d, "transcript.json")["islands"]
-    cuts = load(d, "cuts.json")
+    isl, cuts = load_cuts(d)
     x, sr = read_wav(Path(d) / "a16.wav")
     env = rms_db(x[:, 0], sr)
     thr = proj.get("speech_threshold_db", -40)
@@ -91,14 +92,22 @@ def build_spans(d):
 
 def main(d, workers=3):
     d = Path(d)
+    ver = ffmpeg_version()
+    if ver and ver < (5, 1):
+        die(f"你的 ffmpeg 是 {ver[0]}.{ver[1]} 版，太舊了，剪片需要 5.1 以上。"
+            "執行 python install/setup.py check 會告訴你怎麼升級。")
     proj, isl, spans = build_spans(d)
+    src = proj.get("work_source") or proj["source"]
+    if not Path(src).exists():
+        die(f"找不到要剪的影片：{src}。請重跑 transcribe。")
     fps = proj["fps"]
     off = proj.get("v_start", 0) - proj.get("a_start", 0)     # video frame k plays at audio time off + k/fps
-    # frames
+    # frames (the sound often runs a little past the last picture: never ask for frames the video doesn't have)
+    n_frames = int((proj.get("v_duration") or proj["duration"]) * fps + 1e-6)
     fr = []
     for a, b, iid in spans:
         fa, fb = round((a - off) * fps), round((b - off) * fps)
-        fa = max(fa, 0)
+        fa, fb = max(fa, 0), min(fb, n_frames)
         if fb - fa < 2:
             continue
         if fr and fa <= fr[-1][1]:                     # touching / overlapping: one continuous piece
@@ -132,7 +141,7 @@ def main(d, workers=3):
         vf += [f"scale={ow}:{oh}:flags=lanczos", "setsar=1", "format=yuv420p", "setpts=PTS-STARTPTS"]
         ss = proj.get("v_start", 0) - proj.get("fmt_start", 0) + (fa - 0.5) / fps
         out = seg_dir / f"{k:04d}.mp4"
-        jobs.append((["-ss", f"{max(ss, 0):.6f}", "-i", proj["source"], "-frames:v", fb - fa, "-an",
+        jobs.append((["-ss", f"{max(ss, 0):.6f}", "-i", src, "-frames:v", fb - fa, "-an",
                       "-vf", ",".join(vf), "-fps_mode", "passthrough",   # -r here would repeat the first frame
                       "-c:v", "libx264", "-preset", "veryfast", "-crf", 16, "-g", 60, out], fb - fa, out, z))
 
@@ -151,7 +160,9 @@ def main(d, workers=3):
         list(ex.map(work, jobs))
     lst = seg_dir / "list.txt"
     lst.write_text("".join(f"file '{j[2].name}'\n" for j in jobs), encoding="utf-8")
-    ffmpeg("-f", "concat", "-safe", 0, "-i", lst, "-c", "copy", d / "cut_video.mp4")
+    (d / "cut_video.mp4").unlink(missing_ok=True)     # never leave an old cut next to a new timeline
+    ffmpeg("-f", "concat", "-safe", 0, "-i", lst, "-c", "copy", d / "cut_video.tmp.mp4")
+    os.replace(d / "cut_video.tmp.mp4", d / "cut_video.mp4")
 
     # sound: same frame times, sample exact, 6 ms fades at every join
     v48, sr = read_wav(d / "voice48.wav")
@@ -197,13 +208,15 @@ def main(d, workers=3):
             words_out.append({"w": w["w"], "t0": round(t0, 3), "t1": round(max(t1, t0 + 0.04), 3),
                               "island": s["id"], "sp": w.get("sp", False)})
     dur = cum / fps
-    save(d, "timeline.json", {"duration": round(dur, 4), "frames": cum, "spans": spans_out, "words": words_out})
+    tl = {"duration": round(dur, 4), "frames": cum, "spans": spans_out, "words": words_out}
 
     # check: picture and sound have the same length
     r = run([need("ffprobe"), "-v", "error", "-count_packets", "-select_streams", "v:0",
              "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", str(d / "cut_video.mp4")])
     nv = int(r.stdout.strip() or 0)
+    tl["video_frames"] = nv
+    save(d, "timeline.json", tl)
     if nv != cum:
-        print(f"[注意] 影像格數 {nv}，預期 {cum}")
+        print(f"[注意] 影像格數 {nv}，預期 {cum}（差幾格的話，成片最後會短一點點，不影響對嘴）")
     src_len = proj["duration"]
     print(f"剪好了：{src_len / 60:.1f} 分鐘 → {dur / 60:.1f} 分鐘（{len(fr)} 段，影像 {nv} 格，聲音 {len(np.concatenate(parts)) / sr:.2f} 秒）")

@@ -20,20 +20,19 @@ fx.json (written by the assistant; "at" = a few words from the subtitles, the ef
   Every effect also takes "dur" (seconds) or "until" (words where it ends), and "side" ("L" / "R") where it fits.
 """
 import math
+import os
 import re
 import subprocess
-import urllib.request
 from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-from .common import ROOT, die, ffmpeg, font_path, load, need, norm, save
+from .common import die, font_path, load, need, norm, save
+from .download import DownloadError, fetch, is_ok
+from .resources import MODEL, MODEL_SHA256, MODEL_URL
 
 GOLD = (232, 196, 120)
-MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/"
-             "selfie_segmenter.tflite")
-MODEL = ROOT / "assets" / "models" / "selfie_segmenter.tflite"
 DEFAULT_DUR = {"word": 2.4, "glow": 1.7, "note": 4.0, "stat": 3.0, "progress": 3.5, "list": 5.0, "prompt": 4.5,
                "wall": 4.0, "vcard": 4.5, "orbit": 6.0}
 BACK_TYPES = {"word", "note", "stat", "progress", "list", "prompt", "wall", "vcard"}
@@ -139,10 +138,13 @@ class Matte:
         import mediapipe as mp
         from mediapipe.tasks import python as mpt
         from mediapipe.tasks.python import vision
-        if not MODEL.exists():
-            MODEL.parent.mkdir(parents=True, exist_ok=True)
-            print("下載人像去背模型（約 250 KB）…")
-            urllib.request.urlretrieve(MODEL_URL, MODEL)
+        if not is_ok(MODEL, MODEL_SHA256):
+            if not MODEL.exists():
+                print("下載人像去背模型（約 250 KB）…")
+            try:
+                fetch(MODEL_URL, MODEL, MODEL_SHA256, "人像去背模型")
+            except DownloadError as e:
+                die(str(e))
         opts = vision.ImageSegmenterOptions(base_options=mpt.BaseOptions(model_asset_path=str(MODEL)),
                                             running_mode=vision.RunningMode.VIDEO, output_confidence_masks=True)
         self.seg = vision.ImageSegmenter.create_from_options(opts)
@@ -903,20 +905,44 @@ class Ctx:
 
 # ------------------------------------------------------------------ main
 
+def fx_available():
+    """The effects need MediaPipe + OpenCV, which are optional (they don't install on every computer)."""
+    try:
+        import cv2  # noqa: F401
+        import mediapipe  # noqa: F401
+        from mediapipe.tasks.python import vision  # noqa: F401
+        return None
+    except Exception as e:  # noqa: BLE001
+        return f"{type(e).__name__}: {e}"
+
+
+def _no_fx(d, proj, msg):
+    """No effects this time: finish must use the plain cut, not an fx_video.mp4 left from an earlier run."""
+    if proj.pop("video_for_finish", None):
+        save(d, "project.json", proj)
+        msg += "（成片會用沒有特效的版本）"
+    print(msg)
+
+
 def main(d):
     d = Path(d)
     proj = load(d, "project.json")
     tl = load(d, "timeline.json")
     specs = load(d, "fx.json", [])
     if not specs:
-        print("沒有 fx.json，跳過動態特效。")
-        return
+        return _no_fx(d, proj, "沒有 fx.json，跳過動態特效。")
+    if not isinstance(specs, list):
+        die('fx.json 的格式不對：最外層要是一個清單 [ {...}, {...} ]。')
+    why = fx_available()
+    if why:
+        die("動態特效需要的套件（MediaPipe／OpenCV）沒有裝好，這台電腦先不能做特效；其他步驟都可以照常用。\n"
+            f"可以重跑 install 再試一次，或直接跳過特效這一步。（{why}）")
     ctx = Ctx(d, proj, tl)
     W, H = proj["out_w"], proj["out_h"]
     kit = Kit(W, H, font_path(proj.get("font")))
     effects = []
     for e in specs:
-        kind = e.get("type")
+        kind = e.get("type") if isinstance(e, dict) else None
         if kind not in KINDS:
             print(f"[注意] 不認得的特效 {kind}，跳過")
             continue
@@ -932,61 +958,71 @@ def main(d):
     if ctx.missing:
         print("[注意] 這些 at／until 找不到對應的字幕：", "、".join(dict.fromkeys(ctx.missing)))
     if not effects:
-        return
+        return _no_fx(d, proj, "fx.json 裡沒有可以做的特效。")
     effects.sort(key=lambda f: f.t0)
     print(f"特效 {len(effects)} 個：" + "、".join(f"{type(f).__name__}@{f.t0:.1f}s" for f in effects))
 
+    # until this run finishes, finish uses the plain cut (an interrupted run must not leave old effects in)
+    if proj.pop("video_for_finish", None):
+        save(d, "project.json", proj)
+    out, tmp = d / "fx_video.mp4", d / "fx_video.tmp.mp4"
     fps_s = f"{proj['fps_num']}/{proj['fps_den']}"
+    matte = Matte(W, H)
     dec = subprocess.Popen([need("ffmpeg"), "-nostdin", "-v", "error", "-i", str(d / "cut_video.mp4"),
-                            "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+                            "-vf", "setpts=N/FRAME_RATE/TB", "-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
     enc = subprocess.Popen([need("ffmpeg"), "-nostdin", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
                             "-s", f"{W}x{H}", "-r", fps_s, "-i", "-", "-c:v", "libx264", "-preset", "veryfast",
-                            "-crf", "16", "-pix_fmt", "yuv420p", str(d / "fx_video.mp4")], stdin=subprocess.PIPE)
-    matte = Matte(W, H)
+                            "-crf", "16", "-pix_fmt", "yuv420p", "-f", "mp4", str(tmp)], stdin=subprocess.PIPE)
     fsz = W * H * 3
     fps = proj["fps"]
     i = 0
     was_active = False
-    while True:
-        buf = dec.stdout.read(fsz)
-        if len(buf) < fsz:
-            break
-        t = i / fps
-        act = [f for f in effects if f.active(t)]
-        if not act:
-            enc.stdin.write(buf)
-            if was_active:
-                matte.reset()
-            was_active = False
+    try:
+        while True:
+            buf = dec.stdout.read(fsz)
+            if len(buf) < fsz:
+                break
+            t = i / fps
+            act = [f for f in effects if f.active(t)]
+            if not act:
+                enc.stdin.write(buf)
+                if was_active:
+                    matte.reset()
+                was_active = False
+                i += 1
+                continue
+            was_active = True
+            base = np.frombuffer(buf, np.uint8).reshape(H, W, 3)
+            m = matte(base, t)
+            for f in act:
+                if not hasattr(f, "_ready"):
+                    f.setup(head_box(m)) if hasattr(f, "setup") else None
+                    f._ready = True
+            fr = base.astype(np.float32)
+            for f in act:
+                if f.layer in ("back", "both"):
+                    f.draw(fr, t, "back")
+            mm = m[..., None]
+            fr = fr * (1 - mm) + base.astype(np.float32) * mm         # the person stays in front
+            for f in act:
+                if isinstance(f, Glow):
+                    f.draw(fr, t, "front", m)
+                elif f.layer in ("front", "both"):
+                    f.draw(fr, t, "front")
+            enc.stdin.write(np.clip(fr, 0, 255).astype(np.uint8).tobytes())
             i += 1
-            continue
-        was_active = True
-        base = np.frombuffer(buf, np.uint8).reshape(H, W, 3)
-        m = matte(base, t)
-        for f in act:
-            if not hasattr(f, "_ready"):
-                f.setup(head_box(m)) if hasattr(f, "setup") else None
-                f._ready = True
-        fr = base.astype(np.float32)
-        for f in act:
-            if f.layer in ("back", "both"):
-                f.draw(fr, t, "back")
-        mm = m[..., None]
-        fr = fr * (1 - mm) + base.astype(np.float32) * mm         # the person stays in front
-        for f in act:
-            if isinstance(f, Glow):
-                f.draw(fr, t, "front", m)
-            elif f.layer in ("front", "both"):
-                f.draw(fr, t, "front")
-        enc.stdin.write(np.clip(fr, 0, 255).astype(np.uint8).tobytes())
-        i += 1
-        if i % 300 == 0:
-            print(f"  {i / fps:.0f} 秒")
-    enc.stdin.close()
-    enc.wait()
-    dec.wait()
-    if i != tl["frames"]:
-        print(f"[注意] 特效影片 {i} 格，預期 {tl['frames']} 格")
+            if i % 300 == 0:
+                print(f"  {i / fps:.0f} 秒")
+        enc.stdin.close()
+    except BrokenPipeError:
+        pass
+    enc_rc, dec_rc = enc.wait(), dec.wait()
+    want = tl.get("video_frames", tl["frames"])
+    if enc_rc != 0 or dec_rc != 0 or i != want:
+        tmp.unlink(missing_ok=True)
+        die(f"特效影片沒有做好（輸出 {i} 格，應該要 {want} 格；編碼結束碼 {enc_rc}、解碼結束碼 {dec_rc}）。"
+            "成片會先用沒有特效的版本；可以重跑 fx 再試一次，或跳過特效。")
+    os.replace(tmp, out)
     proj["video_for_finish"] = "fx_video.mp4"
     save(d, "project.json", proj)
     print(f"動態特效完成：fx_video.mp4（{i} 格）")

@@ -1,7 +1,6 @@
 """Shared helpers: ffmpeg/ffprobe calls, audio I/O, fonts, project files."""
 import json
 import os
-import platform
 import re
 import shutil
 import subprocess
@@ -24,7 +23,7 @@ def die(msg):
 def need(tool):
     p = shutil.which(tool)
     if not p:
-        die(f"找不到 {tool}。請先執行安裝步驟（python install/check_env.py 會告訴你缺什麼）。")
+        die(f"找不到 {tool}。請先執行安裝步驟（python install/setup.py check 會告訴你缺什麼）。")
     return p
 
 
@@ -43,29 +42,99 @@ def ffmpeg(*args):
     return run([need("ffmpeg"), "-nostdin", "-hide_banner", "-v", "error", "-y", *map(str, args)])
 
 
+HDR_TRANSFERS = {"arib-std-b67", "smpte2084"}          # HLG (iPhone default) and PQ (HDR10 / Dolby Vision)
+STD_RATES = [(24000, 1001), (24, 1), (25, 1), (30000, 1001), (30, 1), (50, 1), (60000, 1001), (60, 1)]
+
+
+def _frac(s):
+    try:
+        a, b = map(int, str(s).split("/"))
+        return (a, b) if a > 0 and b > 0 else None
+    except ValueError:
+        return None
+
+
+def _seconds(s):
+    """'12.5' or '00:00:12.500000000' -> 12.5; None if missing / unreadable."""
+    try:
+        if s is None:
+            return None
+        if ":" in str(s):
+            h, m, sec = str(s).split(":")
+            return int(h) * 3600 + int(m) * 60 + float(sec)
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _rotation(v):
+    """Display rotation in degrees (phones store portrait video as landscape + a 'turn 90 degrees' flag)."""
+    for sd in v.get("side_data_list", []) or []:
+        if "rotation" in sd:
+            try:
+                return int(round(float(sd["rotation"]))) % 360
+            except (TypeError, ValueError):
+                pass
+    try:
+        return int(float((v.get("tags") or {}).get("rotate", 0))) % 360
+    except (TypeError, ValueError):
+        return 0
+
+
+def cfr_rate(avg):
+    """A steady frame rate for a variable-frame-rate clip: the standard rate near its average, else a round number."""
+    num, den = avg
+    f = num / den
+    for n, d in STD_RATES:
+        if abs(f - n / d) / (n / d) < 0.03:
+            return n, d
+    return min(60, max(24, round(f))), 1
+
+
 def probe(path):
-    """Return fps (as fraction num/den), duration, width, height, audio channels."""
+    """fps (fraction), duration, size as shown (rotation applied), audio channels, start times, and flags for
+    clips that need a steady work copy first: variable frame rate (vfr) and HDR."""
     r = run([need("ffprobe"), "-v", "error", "-show_entries",
-             "format=duration,start_time:stream=codec_type,width,height,r_frame_rate,avg_frame_rate,channels,start_time",
+             "format=duration,start_time:stream=codec_type,width,height,r_frame_rate,avg_frame_rate,channels,"
+             "start_time,duration,color_transfer,pix_fmt:stream_side_data=rotation:stream_tags=rotate,DURATION",
              "-of", "json", str(path)])
-    j = json.loads(r.stdout)
+    return parse_probe(json.loads(r.stdout), path)
+
+
+def parse_probe(j, path=""):
     v = next((s for s in j["streams"] if s.get("codec_type") == "video"), None)
     a = next((s for s in j["streams"] if s.get("codec_type") == "audio"), None)
     if v is None:
         die(f"{path} 裡面沒有影像。")
     if a is None:
         die(f"{path} 裡面沒有聲音，沒辦法聽打。")
-    num, den = map(int, (v.get("r_frame_rate") or v.get("avg_frame_rate")).split("/"))
-    if num == 0:
-        num, den = map(int, v["avg_frame_rate"].split("/"))
+    rf, af = _frac(v.get("r_frame_rate")), _frac(v.get("avg_frame_rate"))
+    num, den = rf or af or (30, 1)
+    # r_frame_rate is the container's "nominal" rate; on screen recordings and some phones the real average is far
+    # lower. Then frame k is NOT at k/fps seconds and a cut drifts out of sync -> make a steady (CFR) copy first.
+    vfr = bool(rf and af and abs(rf[0] / rf[1] - af[0] / af[1]) / (rf[0] / rf[1]) > 0.01)
+    w, h = int(v["width"]), int(v["height"])
+    rot = _rotation(v)
+    if rot in (90, 270):           # ffmpeg turns the picture upright when decoding, so use the upright size
+        w, h = h, w
+    dur = float(j["format"]["duration"])
+    v_dur = _seconds(v.get("duration")) or _seconds((v.get("tags") or {}).get("DURATION")) or dur   # mkv: tag
     return {"fps_num": num, "fps_den": den, "fps": num / den,
-            "duration": float(j["format"]["duration"]),
-            "width": int(v["width"]), "height": int(v["height"]),
+            "duration": dur, "v_duration": v_dur,
+            "width": w, "height": h, "rotation": rot,
             "channels": int(a.get("channels", 1)),
+            "vfr": vfr, "avg_fps": list(af) if af else None,
+            "hdr": v.get("color_transfer") in HDR_TRANSFERS,
             # where video / audio start inside the file (usually 0); used to keep picture and sound in sync
             "fmt_start": float(j["format"].get("start_time", 0) or 0),
             "v_start": float(v.get("start_time", 0) or 0),
             "a_start": float(a.get("start_time", 0) or 0)}
+
+
+def has_filter(name):
+    r = subprocess.run([need("ffmpeg"), "-hide_banner", "-filters"], capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+    return re.search(rf"^\s*\S+\s+{re.escape(name)}\s", r.stdout, re.M) is not None
 
 
 def read_wav(path):
@@ -101,11 +170,18 @@ def load(d, name, default=None):
         if default is not None:
             return default
         die(f"找不到 {p}。是不是前一步還沒跑？")
-    return json.loads(p.read_text(encoding="utf-8"))
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        die(f"{p.name} 的格式壞了（第 {e.lineno} 行第 {e.colno} 個字附近：{e.msg}）。請修正這個檔，再重跑這一步。")
 
 
 def save(d, name, obj):
-    (Path(d) / name).write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
+    """Write via a temp file + rename, so a step that gets interrupted never leaves half a json behind."""
+    p = Path(d) / name
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, p)
 
 
 # ---------- Chinese text helpers
@@ -143,25 +219,27 @@ FONT_CANDIDATES = [
 ]
 
 
+_warned = {}
+
+
 def font_path(custom=None):
     if custom and Path(custom).exists():
         return str(custom)
+    from .download import is_ok
+    from .resources import FONT_SHA256
     for p in FONT_CANDIDATES:
         if p.exists():
+            if p == FONT_CANDIDATES[0] and not is_ok(p, FONT_SHA256):
+                if not _warned.get("font"):
+                    print("[注意] 下載的字型檔不完整，先改用電腦內建字型。重跑一次 install 會重新下載。", file=sys.stderr)
+                    _warned["font"] = True
+                continue
             return str(p)
     die("找不到中文粗體字型。請重新執行安裝，或在 project.json 的 font 填一個 .ttf/.ttc 路徑。")
 
 
-def os_name():
-    s = platform.system()
-    return {"Darwin": "mac", "Windows": "windows"}.get(s, "linux")
-
-
-def ffmpeg_major():
-    r = subprocess.run([need("ffmpeg"), "-version"], capture_output=True, text=True)
-    m = re.search(r"ffmpeg version n?(\d+)", r.stdout)
-    return int(m.group(1)) if m else 6
-
-
-def cpu_threads():
-    return max(1, (os.cpu_count() or 4) - 1)
+def ffmpeg_version():
+    """(major, minor) of the installed ffmpeg, or None when the build does not say (e.g. git snapshot builds)."""
+    r = subprocess.run([need("ffmpeg"), "-version"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    m = re.search(r"ffmpeg version n?(\d+)\.(\d+)", r.stdout)
+    return (int(m.group(1)), int(m.group(2))) if m else None

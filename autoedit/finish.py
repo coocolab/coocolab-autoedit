@@ -8,13 +8,15 @@ overlay filter. This works with any ffmpeg build (no libass / drawtext needed) o
 """
 import hashlib
 import json
+import math
+import os
 import re
 import shutil
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-from .common import die, ffmpeg, font_path, load, need, norm, run, save
+from .common import die, ffmpeg, font_path, load, need, norm, run
 
 PUNCT = "，。！？、；：,.!?;:…—「」『』（）()\"'"
 ORANGE = (255, 159, 28, 255)
@@ -367,21 +369,43 @@ def finish(d):
     r = run([need("ffmpeg"), "-nostdin", "-hide_banner", "-i", str(a_in), "-af",
              f"{tempo}loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json", "-f", "null", "-"])
     m = json.loads(re.findall(r"\{[^{}]+\}", r.stderr)[-1])
-    ln_args = (f"loudnorm=I=-14:TP=-1.5:LRA=11:measured_I={m['input_i']}:measured_TP={m['input_tp']}:"
-               f"measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}:offset={m['target_offset']}:linear=true")
-    ffmpeg("-i", a_in, "-af", f"{tempo}{ln_args},aresample=48000", "-c:a", "pcm_s16le",
+    try:
+        ok = all(math.isfinite(float(m[k])) for k in ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset"))
+    except (KeyError, ValueError):
+        ok = False
+    if ok:
+        ln_args = (f"loudnorm=I=-14:TP=-1.5:LRA=11:measured_I={m['input_i']}:measured_TP={m['input_tp']}:"
+                   f"measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}:offset={m['target_offset']}:"
+                   "linear=true,")
+    else:
+        print("[注意] 聲音幾乎都是靜音，量不到音量，這次不調整音量。請確認原片有收到聲音。")
+        ln_args = ""
+    ffmpeg("-i", a_in, "-af", f"{tempo}{ln_args}aresample=48000", "-c:a", "pcm_s16le",
            d / "final_audio.wav")
 
     out_dir = Path(proj["output_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{proj['name']}.mp4"
-    vf = (f"[0:v]setpts=PTS/{speed}[b];[1:v]format=rgba[o];"
-          f"[b][o]overlay=0:0:eof_action=pass:format=auto,fps={proj['fps_num']}/{proj['fps_den']},format=yuv420p[v]")
+    if out.resolve() == Path(proj["source"]).resolve():
+        die(f"成片的檔名會跟原片一樣（{out}），會蓋掉原片，所以停下來。請把原片放在「原片」資料夾，重新 init。")
+    # frame k of the cut is at k / fps (the cut is built that way); index-based times avoid a dropped or doubled
+    # frame where two pieces join
+    fr_s = f"{proj['fps_num']}/{proj['fps_den']}"
+    vf = (f"[0:v]setpts=N/({fr_s})/TB/{speed}[b];[1:v]format=rgba[o];"
+          f"[b][o]overlay=0:0:eof_action=pass:format=auto,fps={fr_s},format=yuv420p[v]")
     print("輸出成片中…（長片要幾分鐘）")
-    video = d / proj.get("video_for_finish", "cut_video.mp4")
+    video = d / "cut_video.mp4"
+    fxv = proj.get("video_for_finish")
+    if fxv:
+        if (d / fxv).exists() and os.path.getmtime(d / fxv) >= os.path.getmtime(video):
+            video = d / fxv
+        else:
+            print("[注意] 特效版影片比剪好的影片舊（重剪過之後沒有重跑 fx），這次用沒有特效的版本。")
+    tmp = out.with_name(out.stem + ".輸出中.mp4")
     ffmpeg("-i", video, "-f", "concat", "-safe", 0, "-i", ov / "list.txt", "-i", d / "final_audio.wav",
            "-filter_complex", vf, "-map", "[v]", "-map", "2:a", "-c:v", "libx264", "-preset", "medium", "-crf", 19,
-           "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", out)
+           "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", tmp)
+    os.replace(tmp, out)
 
     # .srt next to the video
     srt = []

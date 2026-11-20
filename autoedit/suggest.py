@@ -6,13 +6,15 @@ fixes the draft with judgment (cuts.json), and shows the user 剪掉清單.md be
 
 cuts.json:
   {"keep": [{"id": 0}, {"id": 5, "from": 3, "to": 12}, ...],   # from/to = word index in that island, `to` exclusive
-   "why":  {"4": "重講", "5": "句中重講：最狠的是"}}
+   "why":  {"4": "重講", "5": "句中重講：最狠的是"},
+   "transcript_fp": "..."}                                      # which transcript these ids belong to
 """
 import difflib
+import os
 import re
 from pathlib import Path
 
-from .common import load, norm, save
+from .common import die, load, norm, save
 
 FILLER = re.compile(r"^(嗯|哼|啊|呃|欸|誒|哦|喔|噢|唉|那個|就是|然後|好|對|ok|okay|um|uh|hmm)+$", re.I)
 
@@ -115,14 +117,47 @@ def draft(d):
             why[str(i)] = f"句中重講：「{phrase}」講了兩次，留第二次"
             continue
         keep.append({"id": i})
-    save(d, "cuts.json", {"keep": keep, "why": why})
+    tr = load(d, "transcript.json")
+    save(d, "cuts.json", {"keep": keep, "why": why, "transcript_fp": tr.get("fp", "")})
     write_list(d)
+
+
+def load_cuts(d):
+    """transcript islands + cuts.json, after checking that cuts.json fits this transcript and is well formed.
+    Anything wrong stops here with a plain message, instead of a crash (or a wrong cut) later."""
+    d = Path(d)
+    tr = load(d, "transcript.json")
+    isl = tr["islands"]
+    cuts = load(d, "cuts.json")
+    fp = tr.get("fp")
+    stale = (cuts.get("transcript_fp") != fp) if (fp and cuts.get("transcript_fp")) else \
+        os.path.getmtime(d / "cuts.json") < os.path.getmtime(d / "transcript.json")
+    if stale:
+        die("逐字稿重做過了（重跑過 transcribe），cuts.json 還是照舊逐字稿寫的，段落編號已經對不上。\n"
+            "請重跑 suggest，重新看過剪掉清單、修好 cuts.json 再剪。")
+    if not isinstance(cuts, dict) or not isinstance(cuts.get("keep"), list):
+        die('cuts.json 的格式不對：最外層要是 {"keep": [...], "why": {...}}。')
+    if not isinstance(cuts.get("why", {}), dict):
+        die('cuts.json 的 "why" 要是 {"段落編號": "原因"} 這種格式。')
+    for n, k in enumerate(cuts["keep"]):
+        if not isinstance(k, dict) or "id" not in k:
+            die(f'cuts.json 的 keep 第 {n + 1} 項格式不對，要像 {{"id": 3}} 或 {{"id": 3, "from": 0, "to": 5}}：{k}')
+        i = k["id"]
+        if not isinstance(i, int) or isinstance(i, bool) or not 0 <= i < len(isl):
+            die(f"cuts.json 的 keep 第 {n + 1} 項：段落編號 {i!r} 不存在（這支只有 0～{len(isl) - 1}）。")
+        nw = len(isl[i]["words"])
+        if nw == 0:
+            continue
+        f, t = k.get("from", 0), k.get("to", nw)
+        if not all(isinstance(v, int) and not isinstance(v, bool) for v in (f, t)) or not 0 <= f < t <= nw:
+            die(f"cuts.json 的 keep 第 {n + 1} 項（段落 {i}）：from／to 要是整數，而且 0 ≤ from < to ≤ {nw}"
+                f"（這段有 {nw} 個字），現在是 from={f!r}、to={t!r}。可以用 words 指令看每個字的編號。")
+    return isl, cuts
 
 
 def write_list(d):
     """剪掉清單.md from transcript.json + cuts.json: everything that is NOT kept, in time order."""
-    isl = load(d, "transcript.json")["islands"]
-    cuts = load(d, "cuts.json")
+    isl, cuts = load_cuts(d)
     why = cuts.get("why", {})
     kept = {}
     for k in cuts["keep"]:
