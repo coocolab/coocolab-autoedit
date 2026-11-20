@@ -345,7 +345,7 @@ def install(folder, allow_cloud=False, skip_fx=False):
     for k, val in res.items():
         print(f"{k}：{val}")
         if "libGL" in str(val) or "libEGL" in str(val):  # libGL, libGLESv2
-            print("  → Linux 缺少圖形函式庫，執行 sudo apt install libgl1 libegl1 再重跑 install，就能用動態特效。")
+            print("  → Linux 缺少圖形函式庫，執行 sudo apt install libgl1 libegl1 libgles2 再重跑 install，就能用動態特效。")
         if str(val).startswith("失敗") and not k.startswith("動態特效"):
             bad = True
     print("\n── 安裝完成 ──" if not bad else "\n── 安裝有問題 ──")

@@ -84,7 +84,7 @@ def _plain_error(step, e):
     elif isinstance(e, ModuleNotFoundError):
         why = f"缺少套件 {e.name}。請重新執行安裝（install/setup.py install）。"
     elif isinstance(e, OSError) and re.search(r"\.(so|dll|dylib)\b|shared object", str(e)):
-        why = "電腦缺少某個系統函式庫（常見於 Linux 的動態特效：sudo apt install libgl1 libegl1）。"
+        why = "電腦缺少某個系統函式庫（常見於 Linux 的動態特效：sudo apt install libgl1 libegl1 libgles2）。"
     elif isinstance(e, OSError):
         why = "讀寫檔案時出錯：可能是檔案被別的程式開著、硬碟滿了，或路徑不存在。"
     else:

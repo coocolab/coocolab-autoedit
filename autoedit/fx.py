@@ -921,7 +921,7 @@ def fx_available():
     except Exception as e:  # noqa: BLE001
         msg = f"{type(e).__name__}: {e}"
         if "libEGL" in msg or "libGL" in msg:  # libGL, libGLESv2
-            msg += "。Linux 請先執行 sudo apt install libgl1 libegl1"
+            msg += "。Linux 請先執行 sudo apt install libgl1 libegl1 libgles2"
         return msg
 
 
