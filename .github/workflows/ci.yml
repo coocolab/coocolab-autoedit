@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ffmpeg
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   sudo apt-get update -q && sudo apt-get install -y -q ffmpeg libgl1 ;;
+            macOS)   brew install ffmpeg ;;
+            Windows) choco install ffmpeg -y --no-progress ;;
+          esac
+          ffmpeg -version | head -1
+
+      - name: setup.py check
+        run: python install/setup.py check
+
+      - name: setup.py install (venv, requirements, fonts, AI剪片 folder, import self-test)
+        run: python install/setup.py install --folder "$RUNNER_TEMP/AI剪片"
+
+      - name: Venv python
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then echo "VPY=.venv/Scripts/python.exe" >> "$GITHUB_ENV"
+          else echo "VPY=.venv/bin/python" >> "$GITHUB_ENV"; fi
+
+      - name: Import test
+        run: |
+          "$VPY" -c "import numpy, PIL, opencc, certifi; print('base OK')"
+          "$VPY" -c "import platform; import importlib; m = 'mlx_whisper' if (platform.system() == 'Darwin' and platform.machine() == 'arm64') else 'faster_whisper'; importlib.import_module(m); print(m, 'OK')"
+          "$VPY" -c "import cv2, mediapipe; from mediapipe.tasks.python import vision; print('fx OK', cv2.__version__, mediapipe.__version__)"
+          "$VPY" ae.py --version
+
+      - name: Unit tests
+        run: '"$VPY" -m unittest discover -s tests -v'
+
+      # The speech model (1.5 GB) is not downloaded here: the end-to-end run uses a made-up transcript and
+      # tests everything around it (probe, work copy, cut, subtitles, effects, finish, cover, qa).
+      - name: End-to-end on synthetic videos (no speech model)
+        run: '"$VPY" tests/e2e_synthetic.py "$RUNNER_TEMP/e2e"'
+
+      - name: Upload outputs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/e2e/AI剪片/工作區/**/*.json
+            autoedit-error.log
+            ${{ runner.temp }}/e2e/AI剪片/autoedit-error.log
+          if-no-files-found: ignore
