@@ -1,0 +1,67 @@
+name: 回報問題
+description: 裝不起來、剪壞了、跳錯誤訊息
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        謝謝回報！請把下面的欄位填完整，越完整越快找到原因。不知道怎麼取得的，可以請你的 AI 助理（Claude Code／Codex）幫你跑指令、填表。
+        **請不要貼影片、帳號、密碼或其他個人資料。**
+  - type: dropdown
+    id: os
+    attributes:
+      label: 作業系統
+      options:
+        - macOS
+        - Windows 11
+        - Windows 10
+        - Linux
+        - 其他
+    validations:
+      required: true
+  - type: input
+    id: chip
+    attributes:
+      label: 晶片／顯示卡
+      description: 例如「Apple M2」「Intel Core i7＋NVIDIA RTX 3060」「Snapdragon X」
+    validations:
+      required: true
+  - type: textarea
+    id: check
+    attributes:
+      label: "`python install/setup.py check` 的完整輸出"
+      description: 在工具資料夾執行（Windows 用 `py install/setup.py check`），整段貼上
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: ffmpeg
+    attributes:
+      label: "`ffmpeg -version` 的第一行"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 工具版本
+      description: "`<.venv 的 python> ae.py --version` 的輸出"
+  - type: input
+    id: step
+    attributes:
+      label: 出錯的步驟
+      description: 例如 install、transcribe、cut、fx、finish
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: 錯誤訊息（最後 20 行）
+      description: 有 `autoedit-error.log` 的話也一起貼上
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: more
+    attributes:
+      label: 其他說明
+      description: 影片是怎麼錄的（手機直拍、螢幕錄影、相機）、多長、做了什麼操作

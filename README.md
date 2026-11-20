@@ -22,23 +22,28 @@
 
 ## 安裝（最簡單的方法）
 
-到 [酷可實驗室官網的免費資源區](https://coocolab.com) 複製「一鍵剪片」的 prompt，整段貼進 Claude Code 或 Codex。它會：
+到 **[免費資源區的「一鍵剪片」頁面](https://coocolab.com/member/resources/?slug=one-click-edit)** 複製安裝 prompt，整段貼進 Claude Code 或 Codex。它會：
 1. 檢查你的電腦：Mac 還是 Windows、夠不夠力、缺哪些工具。
 2. 只下載你缺的東西，每裝一樣都會先問你。
 3. 建好 `AI剪片` 資料夾，裡面有「原片」和「成片」兩個資料夾。
 
 ## 手動安裝
 
-需要：Python 3.10～3.13、ffmpeg、Git。
+需要：Python 3.10～3.13（建議 3.12）、ffmpeg 5.1 以上、Git。
 
 ```bash
 git clone https://github.com/coocolab/coocolab-autoedit.git
 cd coocolab-autoedit
-python3 install/setup.py check      # 看缺什麼
-python3 install/setup.py install    # 建環境、裝套件、建 AI剪片 資料夾（預設在桌面）
+python3 install/setup.py check      # 看缺什麼（什麼都不裝）
+python3 install/setup.py install    # 建環境、裝套件、下載字型、建 AI剪片 資料夾（預設在桌面）
 ```
 
-Windows 把 `python3` 換成 `py`。
+- Windows 把 `python3` 換成 `py`。
+- `install` 會一次裝完 Python 套件和字型（下載幾百 MB，裝好後 `.venv` 約 1.5 GB；語音模型另外約 1.5 GB，第一次聽打時才下載），約 1～5 分鐘。指令不要被中斷；被中斷的話重跑一次就好，已經裝好的會跳過，下載到一半的檔案會重新下載。
+- 「AI剪片」資料夾預設放桌面。但如果桌面會同步到雲端（Mac 開了「iCloud 桌面與文件」、Windows 桌面被 OneDrive 接管），會改放在家目錄底下的 `AI剪片`，因為幾 GB 的影片會一直上傳。真的要放雲端資料夾，加 `--allow-cloud`。指定位置用 `--folder 路徑`。
+- 動態特效用的 MediaPipe 是選用的（`requirements-fx.txt`）。裝不起來時只有特效不能用，其他功能照常。
+- Linux：Ubuntu 22.04 的 apt ffmpeg 是 4.4，太舊，請用 `sudo snap install ffmpeg` 或靜態版；動態特效需要 `sudo apt install libgl1`。
+- 重跑 `install` 時，如果 `AI剪片` 裡的 `CLAUDE.md`／`AGENTS.md` 被你改過，舊的會先備份成 `.bak-日期`。
 
 ## 怎麼用
 
@@ -47,6 +52,10 @@ Windows 把 `python3` 換成 `py`。
 3. 說「幫我剪這支」。
 
 這個資料夾裡的 `CLAUDE.md`／`AGENTS.md` 會告訴 AI 整個流程和規矩，所以不用再貼任何 prompt。
+
+聽打、剪片、特效、輸出都可能跑超過 2 分鐘（長片要十幾分鐘）。`CLAUDE.md` 已經提醒 AI 用最長的指令逾時或背景執行；如果還是被中斷，重跑同一步就好，每一步都可以安全重跑。
+
+手機直拍（帶旋轉資訊）、螢幕錄影這類「可變幀率」影片、iPhone 的 HDR 影片，聽打前會先在 `工作區/` 轉一份工作檔（原片不動），剪出來才不會變形、不同步或偏灰。
 
 也可以自己下指令：
 
@@ -60,7 +69,10 @@ $AE subs 工作區/我的影片           # → subtitles.txt，錯字寫進 fix
 $AE fx 工作區/我的影片             # 照 fx.json 做動態特效（可省略）
 $AE finish 工作區/我的影片         # → 成片/我的影片.mp4 + .srt
 $AE cover 工作區/我的影片 12.5 "主標" "副標"
+$AE --version
 ```
+
+Windows 的 PowerShell 要在最前面加 `& `（`& "<python>" "<ae.py>" init ...`）。安裝時產生的 `CLAUDE.md` 會寫好兩種寫法。
 
 ## 聽打引擎
 
@@ -88,9 +100,35 @@ $AE cover 工作區/我的影片 12.5 "主標" "副標"
 - `autoedit/fx.py`：動態特效，每一種都是一個 class，可以照著加新的。
 - `agent/AGENTS.template.md`：AI 的工作流程和規矩。
 
-改完歡迎發 PR。
+改完歡迎發 PR。測試：
+
+```bash
+.venv/bin/python -m unittest discover -s tests -v   # 單元測試（不需要影片）
+.venv/bin/python tests/e2e_synthetic.py             # 用 ffmpeg 做假影片，跑完整流程（不需要語音模型）
+```
+
+GitHub Actions 會在 Windows、macOS、Linux 上跑這兩個。
+
+## 支援平台與已知限制
+
+| 平台 | 狀態 |
+|---|---|
+| Mac（M 系列） | 作者實測，包含聽打 |
+| Windows 10／11（x64）、Linux（Ubuntu 24.04）、Intel Mac | 安裝、剪片、字幕、特效有自動測試（CI）；聽打模型沒有在這些平台實測，歡迎回報 |
+
+- **Windows 用 winget 裝完 ffmpeg／Python 後**，新的 PATH 只對新開的程式有效：要把 Claude Code／Codex 整個關掉重開，再貼一次安裝 prompt，它會從檢查環境開始、跳過已經裝好的。
+- **Windows ARM（Snapdragon 筆電）**：聽打套件沒有 ARM 版，請裝 x64 版的 Python 3.12（會用模擬執行，比較慢）。
+- **Windows 使用者名稱是中文**時，動態特效載入模型可能失敗（沒實測）。遇到的話把這個 repo 放到純英文路徑，例如 `C:\coocolab-autoedit`，再重跑 install。
+- **Intel Mac**：MediaPipe 最後一版 Intel 版只支援到 Python 3.12，所以安裝會優先用 3.12；用 3.13 的話動態特效不能用。
+- **Linux**：MediaPipe 新版會用到 `sounddevice`，少了 libportaudio 時可能無法 import，只影響動態特效。
+- **很長的影片**（1 小時以上）：聲音會整段讀進記憶體，8 GB 記憶體的電腦可能不夠，建議先切成幾段。
+- **有 NVIDIA 顯示卡但沒裝 CUDA／cuDNN**：聽打會自動改用 CPU（比較慢）。
+- **搬動了這個 repo 的資料夾**：`.venv` 和 `CLAUDE.md` 裡記的是絕對路徑，搬完要重跑一次 `install`。
+- 套件版本有設上限（見 `requirements*.txt`），是實際裝起來、跑過的版本範圍。
 
 ## 用到的開源專案
+
+完整的授權說明（含模型權重、字型）見 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 - [Whisper](https://github.com/openai/whisper) 語音模型（MIT）
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper)（MIT）
