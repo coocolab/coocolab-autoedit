@@ -32,7 +32,7 @@
 需要：Python 3.10～3.13、ffmpeg、Git。
 
 ```bash
-git clone https://github.com/<帳號>/coocolab-autoedit.git
+git clone https://github.com/coocolab/coocolab-autoedit.git
 cd coocolab-autoedit
 python3 install/setup.py check      # 看缺什麼
 python3 install/setup.py install    # 建環境、裝套件、建 AI剪片 資料夾（預設在桌面）
