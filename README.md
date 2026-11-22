@@ -1,6 +1,18 @@
 # Coocolab AutoEdit｜錄完丟進來，AI 幫你剪
 
-口播影片的 AI 自動剪輯工具。你照常錄，卡住、重講、停頓都沒關係，把影片丟進資料夾，跟 Claude Code 或 Codex 說一句「幫我剪這支」就好。
+[![License: MIT](https://img.shields.io/github/license/coocolab/coocolab-autoedit)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/coocolab/coocolab-autoedit)](https://github.com/coocolab/coocolab-autoedit/releases/latest)
+[![CI](https://github.com/coocolab/coocolab-autoedit/actions/workflows/ci.yml/badge.svg)](https://github.com/coocolab/coocolab-autoedit/actions/workflows/ci.yml)
+
+口播影片的 AI 自動剪輯工具。你照常錄，卡住、重講、停頓都沒關係，把影片丟進資料夾，跟 Claude Code 或 Codex 說一句「幫我剪這支」就好。剪片、上字幕、字卡、音量都會處理，全部在你自己的電腦上跑，免費開源。
+
+[![剪片 5 小時變 0？AI 自動剪輯＋上字幕，整套免費開源 autoedit v1｜酷可實驗室](https://i.ytimg.com/vi/A5-Xyjmkzxk/maxresdefault.jpg)](https://youtu.be/A5-Xyjmkzxk)
+
+**▶ [看影片了解怎麼用](https://youtu.be/A5-Xyjmkzxk)**（點上面的圖也可以）
+
+### 👉 [一鍵安裝 prompt：複製、貼進 Claude Code 或 Codex 就開始裝](https://coocolab.com/member/resources/?slug=one-click-edit)
+
+三步開始：**複製安裝 prompt** → **貼進 Claude Code／Codex，照它的問題回答** → **把影片放進 `AI剪片/原片/`，說「幫我剪這支」**。想自己動手裝，看下面的[手動安裝](#手動安裝)。
 
 > 酷可實驗室，酷的實驗你也可以。
 
@@ -142,3 +154,11 @@ GitHub Actions 會在 Windows、macOS、Linux 上跑這兩個。
 ## 授權
 
 MIT。可以自由使用、修改、商用，保留原作者聲明就好。
+
+## 支持這個專案
+
+覺得好用的話：
+
+- 幫這個 repo 按個 ⭐ Star，讓更多人找得到。
+- 到 YouTube 訂閱 [酷可實驗室](https://www.youtube.com/@coocolab)，之後的更新和新教學都會發在那裡。
+- 到 [Discussions](https://github.com/coocolab/coocolab-autoedit/discussions) 分享你剪出來的片，或是提問、回報問題。
